@@ -71,13 +71,18 @@ class PurePursuitController():
         '''
         This function sets up the publisher for the control command
         '''
+    
+        pub = rospy.Publisher("self.control_topic", Odometry, queue_size=1)
+    
+
         ################## TODO: 1. Set up a publisher for the ServoMsg message###################
         # Create a publisher - self.control_pub:
         #   - subscribes to the topic <self.control_topic>
         #   - has message type <ServoMsg> (racecar_msgs.msg.Odometry) 
         #   - with queue size 1
-        self.control_pub = None # TO BE FILLED
+        self.control_pub = pub # TO BE FILLED
         ########################### END OF TODO 1#################################
+        
         
             
     def setup_subscriber(self):
@@ -87,6 +92,7 @@ class PurePursuitController():
         # This set up a subscriber for the goal you click on the rviz
         self.goal_sub = rospy.Subscriber('/move_base_simple/goal', PoseStamped, self.goal_callback, queue_size=1)
         
+        
         ################## TODO: 2. Set up a subscriber for the odometry message###################
         # Create a subscriber:
         #   - subscribes to the topic <self.odom_topic>
@@ -94,6 +100,7 @@ class PurePursuitController():
         #   - with callback function <self.odometry_callback>, which has already been implemented
         #   - with queue size 1
         ########################### END OF TODO 2#################################
+        rospy.Subscriber(self.odom_topic, Odometry, self.odometry_callback)
         
     def odometry_callback(self, odom_msg: Odometry):
         """
@@ -123,8 +130,10 @@ class PurePursuitController():
         #   and create a 3-dim numpy array [x,y,1]
         # 3. add the goal to the buffer (self.goal_buffer)
         
-        goal_x = np.nan # TO BE FILLED
-        goal_y = np.nan # TO BE FILLED
+        goal_x = goal_msg.pose.position.x # TO BE FILLED
+        goal_y = goal_msg.pose.position.y # TO BE FILLED
+
+        self.goal_buffer.writeFromNonRT(np.array([goal_x, goal_y, 1]))
         
         ########################### END OF TODO 3 #################################
         # Log the goal to the console using "rospy.loginfo"
@@ -156,6 +165,12 @@ class PurePursuitController():
         # 4. Publish the servo message
         
         ########################### END OF TODO 4 #################################
+            
+        msg = ServoMsg()
+        msg.header.stamp = rospy.get_time()
+        msg.throttle = accel
+        msg.steer = steer
+        self.control_pub.publish(msg)
 
     def planning_thread(self):
         '''
@@ -186,6 +201,22 @@ class PurePursuitController():
                     # relative distance between the car and the goal
                     dis2goal = np.sqrt(goal_robot[0]**2 + goal_robot[1]**2)
 
+                    if dis2goal <= self.stop_distance:
+                        accel = -1
+                        steer = 0
+                        continue
+                    elif np.abs(alpha) > np.pi /2:
+                        if alpha > 0:
+                            steer = - self.max_steer
+                        else:
+                            steer = self.max_steer
+                    else:
+                        
+                
+                    
+
+
+
                     ########################## TODO: 5. Finish the pure pursuit controlle ###################
                     # 1. Check if the goal is close enough
                     #
@@ -206,8 +237,7 @@ class PurePursuitController():
                     # 5. clip the steering angle between "-self.steer_max" and "self.steer_max"
                     # 6. apply the simple proportional controller for the acceleration to track the reference_velocity
                     
-                    accel = 0 # TO BE FILLED 
-                    steer = 0 # TO BE FILLED
+                    
                     ########################### END OF TODO 5 ###########################################
                     
                     # publish the control
