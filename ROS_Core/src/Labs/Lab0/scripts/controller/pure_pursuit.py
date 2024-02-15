@@ -206,13 +206,19 @@ class PurePursuitController():
                         steer = 0
                         continue
                     elif np.abs(alpha) > np.pi /2:
+                        reference_velocity = self.max_vel
                         if alpha > 0:
                             steer = - self.max_steer
                         else:
                             steer = self.max_steer
                     else:
-                        
-                
+                        steer =np.arctan(2*self.wheel_base*np.sin(alpha) / min(self.ld_max, dis2goal))
+                        reference_velocity = min(self.max_vel, dis2goal-self.stop_distance)
+
+                    steer = np.clip(steer, -self.steer_max, -self.steer_max)
+
+                    accel = self.throttle_gain * (reference_velocity - vel_cur)
+
                     
 
 
