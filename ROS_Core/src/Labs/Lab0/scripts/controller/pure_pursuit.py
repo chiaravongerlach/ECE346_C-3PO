@@ -72,7 +72,7 @@ class PurePursuitController():
         This function sets up the publisher for the control command
         '''
     
-        pub = rospy.Publisher("self.control_topic", Odometry, queue_size=1)
+        pub = rospy.Publisher(self.control_topic, ServoMsg, queue_size=1)
     
 
         ################## TODO: 1. Set up a publisher for the ServoMsg message###################
@@ -215,7 +215,7 @@ class PurePursuitController():
                         steer =np.arctan(2*self.wheel_base*np.sin(alpha) / min(self.ld_max, dis2goal))
                         reference_velocity = min(self.max_vel, dis2goal-self.stop_distance)
 
-                    steer = np.clip(steer, -self.steer_max, -self.steer_max)
+                    steer = np.clip(steer, -self.max_steer, -self.max_steer)
 
                     accel = self.throttle_gain * (reference_velocity - vel_cur)
 
