@@ -100,7 +100,7 @@ class PurePursuitController():
         #   - with callback function <self.odometry_callback>, which has already been implemented
         #   - with queue size 1
         ########################### END OF TODO 2#################################
-        rospy.Subscriber(self.odom_topic, Odometry, self.odometry_callback)
+        rospy.Subscriber(self.odom_topic, Odometry, self.odometry_callback, queue_size=1)
         
     def odometry_callback(self, odom_msg: Odometry):
         """
