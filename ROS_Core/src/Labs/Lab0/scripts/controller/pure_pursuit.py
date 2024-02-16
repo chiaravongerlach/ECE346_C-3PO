@@ -200,27 +200,24 @@ class PurePursuitController():
                     
                     # relative distance between the car and the goal
                     dis2goal = np.sqrt(goal_robot[0]**2 + goal_robot[1]**2)
-
+                    
                     if dis2goal <= self.stop_distance:
                         accel = -1
                         steer = 0
                         continue
-                    elif np.abs(alpha) > np.pi /2:
+                    elif np.abs(alpha) > np.pi / 2:
                         reference_velocity = self.max_vel
                         if alpha > 0:
-                            steer =  -self.max_steer
+                            steer =  self.max_steer
                         else:
-                            steer = self.max_steer
+                            steer = -self.max_steer
                     else:
-                        steer =-np.arctan(2*self.wheel_base*np.sin(alpha) / min(self.ld_max, dis2goal))
+                        steer = np.arctan(2*self.wheel_base*np.sin(alpha) / min(self.ld_max, dis2goal))
                         reference_velocity = min(self.max_vel, dis2goal-self.stop_distance)
-
-                    steer = np.clip(steer, -self.max_steer, -self.max_steer)
-
-                    accel = self.throttle_gain * (reference_velocity - vel_cur)
-
                     
-
+                    steer = np.clip(steer, -self.max_steer, self.max_steer)
+                    
+                    accel = self.throttle_gain * (reference_velocity - vel_cur)
 
 
                     ########################## TODO: 5. Finish the pure pursuit controlle ###################
