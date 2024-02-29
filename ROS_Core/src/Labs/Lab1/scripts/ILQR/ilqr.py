@@ -169,6 +169,7 @@ class ILQR():
 		path_refs, obs_refs = self.get_references(trajectory)
 
 		# Get the initial cost of the trajectory.
+		print(trajectory.shape, controls.shape, path_refs.shape, obs_refs.shape)
 		J = self.cost.get_traj_cost(trajectory, controls, path_refs, obs_refs)
 
 
@@ -235,14 +236,14 @@ class ILQR():
 
 
 
-		def backward_pass_robust(self, trajectory, controls, reg, path_refs, obs_refs):
+		def backward_pass_robust(trajectory, controls, reg, path_refs, obs_refs):
 			q, r, Q, R, H = self.cost.get_derivatives_np(trajectory, controls, path_refs, obs_refs)
 			A, B = self.dyn.get_jacobian_np(trajectory, controls)
 
 			T = trajectory.shape[1]
 
 			k_open_loop = np.zeros((2, T))
-			K_closed_loop = np.zeros((2, 4, T))
+			K_closed_loop = np.zeros((2, 5, T))
 			# derivative of value function at final step
 			p = q[:,T-1]
 			P = Q[:,:,T-1]
@@ -256,7 +257,7 @@ class ILQR():
 				Q_ux = H[:,:,t] + B[:,:,t].T @ P @ A[:,:,t]
 
 				# Add regularization
-				reg_matrix = reg*np.eye(4)
+				reg_matrix = reg*np.eye(5)
 				Q_uu_reg = R[:,:,t] + B[:,:,t].T @ (P+reg_matrix) @ B[:,:,t]
 				Q_ux_reg = H[:,:,t] + B[:,:,t].T @ (P+reg_matrix) @ A[:,:,t]
 
@@ -298,10 +299,12 @@ class ILQR():
 				for i in range(T-1):
 					Kt = K[:,:,i]
 					kt = k[:,i]
-					U[:,i] = controls[:,i]+alpha*k+ K @ (X[:, i] - trajectory[:, i])
+					U[:,i] = controls[:,i]+alpha*kt + Kt @ (X[:, i] - trajectory[:, i])
 					X[:,i+1], U[:,i] = self.dyn.integrate_forward_np(X[:,i], U[:,i])
 				
 				path_refs, obs_refs = self.get_references(X)
+				print('\n\n')
+				print(X.shape, U.shape, path_refs.shape, obs_refs.shape)
 				J_new, _ = self.cost.get_traj_cost(X, U, path_refs, obs_refs)
 				if J_new<=J:
 					if np.abs(J - J_new) < 1e-3:
