@@ -341,6 +341,7 @@ class TrajectoryPlanner():
             servo_msg.header.stamp = rospy.get_rostime() # use the current time to avoid synchronization issue
             servo_msg.throttle = throttle_pwm
             servo_msg.steer = steer_pwm
+            rospy.loginfo("Publish to Servo")
             self.control_pub.publish(servo_msg)
             
             # Record the control command and state for next iteration
