@@ -325,10 +325,9 @@ class ILQR():
 				t_process=t_process, # Time spent on planning
 				trajectory = trajectory,
 				controls = controls,
-				status=status, #	TODO: Fill this in
-				K_closed_loop=K, # TODO: Fill this in
-				k_open_loop=k # TODO: Fill this in
-				# Optional TODO: Fill in other information you want to return
+				status=status, 	
+				K_closed_loop=K, 
+				k_open_loop=k
 		)
 		return solver_info
 

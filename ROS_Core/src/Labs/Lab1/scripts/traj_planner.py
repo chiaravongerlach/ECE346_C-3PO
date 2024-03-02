@@ -215,7 +215,10 @@ class TrajectoryPlanner():
         ###############################
         # Implement your control law here using ILQR policy
         # Hint: make sure that the difference in heading is between [-pi, pi]
-        u = u_ref + K_closed_loop*(x - x_ref)
+
+        diff = x - x_ref
+        diff[3] = np.clip(diff[3], -np.pi, np.pi)
+        u = u_ref + K_closed_loop*(diff)
         accel = u[0]
         steer_rate = u[1]
 
@@ -452,4 +455,32 @@ class TrajectoryPlanner():
             ###############################
             #### END OF TODO #############
             ###############################
-            time.sleep(0.01)
+            #start = 
+            if self.plan_state_buffer.new_data_available and t_last_replan > self.replan_dt and self.planner_ready:
+                current_state = self.plan_state_buffer.readFromRT()
+                previous_policy = self.policy_buffer.readFromRT()
+
+                if previous_policy is not None:
+                    # come back to the time stuff
+                    initial_controls = previous_policy.get_ref_controls(rospy.get_rostime().to_sec())
+
+                    if self.path_buffer.new_data_available:
+                        self.planner.update_ref_path(self.path_buffer.readFromRT())
+                    
+                    info = self.planner.plan(current_state, initial_controls)
+
+                    status = info.get('status')
+                    trajectory = info.get('trajectory')
+                    if status == 0:
+                        new_policy = Policy(X = trajectory, 
+                                            U = info.get('controls'),
+                                            K = info.get('K_closed_loop'), 
+                                            t0 = rospy.get_rostime().to_sec(), 
+                                            dt = self.planner.dt,
+                                            T = trajectory.shape[1])
+
+                        self.policy_buffer.writeFromNonRT(new_policy)
+                
+                        self.trajectory_pub.publish(new_policy.to_msg())  
+
+            #time.sleep(0.01)
