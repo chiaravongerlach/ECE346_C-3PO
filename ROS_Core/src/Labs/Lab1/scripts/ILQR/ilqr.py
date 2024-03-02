@@ -169,7 +169,6 @@ class ILQR():
 		path_refs, obs_refs = self.get_references(trajectory)
 
 		# Get the initial cost of the trajectory.
-		print(trajectory.shape, controls.shape, path_refs.shape, obs_refs.shape)
 		J = self.cost.get_traj_cost(trajectory, controls, path_refs, obs_refs)
 
 
@@ -284,7 +283,7 @@ class ILQR():
 			return K_closed_loop, k_open_loop, reg
 
 		converged = False
-		
+		status = -1
 		while not converged:
 			K, k, reg = backward_pass_robust(trajectory, controls, self.reg_init, path_refs, obs_refs)
 			
@@ -303,10 +302,8 @@ class ILQR():
 					X[:,i+1], U[:,i] = self.dyn.integrate_forward_np(X[:,i], U[:,i])
 				
 				path_refs, obs_refs = self.get_references(X)
-				print('\n\n')
-				print(X.shape, U.shape, path_refs.shape, obs_refs.shape)
-				J_new, _ = self.cost.get_traj_cost(X, U, path_refs, obs_refs)
-				if J_new<=J:
+				J_new = self.cost.get_traj_cost(X, U, path_refs, obs_refs)
+				if J_new <= J:
 					if np.abs(J - J_new) < 1e-3:
 						converged = True
 					J = J_new
