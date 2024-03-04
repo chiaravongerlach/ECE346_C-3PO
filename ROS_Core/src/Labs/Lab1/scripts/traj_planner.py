@@ -217,8 +217,10 @@ class TrajectoryPlanner():
         # Hint: make sure that the difference in heading is between [-pi, pi]
 
         diff = x - x_ref
-        diff[3] = np.clip(diff[3], -np.pi, np.pi)
-        u = u_ref + K_closed_loop*(diff)
+        diff[3] = diff[3] % (2*np.pi)
+        if diff[3] > np.pi:
+            diff[3] -= 2*np.pi
+        u = u_ref + K_closed_loop@(diff)
         accel = u[0]
         steer_rate = u[1]
 
@@ -341,7 +343,6 @@ class TrajectoryPlanner():
             servo_msg.header.stamp = rospy.get_rostime() # use the current time to avoid synchronization issue
             servo_msg.throttle = throttle_pwm
             servo_msg.steer = steer_pwm
-            rospy.loginfo("Publish to Servo")
             self.control_pub.publish(servo_msg)
             
             # Record the control command and state for next iteration
