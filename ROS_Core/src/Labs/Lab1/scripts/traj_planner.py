@@ -458,19 +458,17 @@ class TrajectoryPlanner():
             ###############################
             #### END OF TODO #############
             ###############################
-            state_and_time = self.plan_state_buffer.readFromRT()
-            current_state = state_and_time[:-1]
-            current_time = state_and_time[5]
-            #current_time = rospy.get_rostime().to_sec()
+            current_time = rospy.get_rostime().to_sec()
             t_since_last_replan = current_time - t_last_replan
             
             if self.plan_state_buffer.new_data_available and t_since_last_replan > self.replan_dt and self.planner_ready:
                 t_last_replan = current_time
+                current_state = self.plan_state_buffer.readFromRT()[:-1]
                 previous_policy = self.policy_buffer.readFromRT()
 
                 if previous_policy is not None:
                     # come back to the time stuff
-                    initial_controls = previous_policy.get_ref_controls(current_time)
+                    initial_controls = previous_policy.get_ref_controls(rospy.get_rostime().to_sec())
                 else:
                     initial_controls = None
 
