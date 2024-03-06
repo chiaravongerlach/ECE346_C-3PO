@@ -222,6 +222,7 @@ class TrajectoryPlanner():
             diff[3] -= 2*np.pi
         u = u_ref + K_closed_loop@(diff)
         accel = u[0]
+
         steer_rate = u[1]
 
         ##### END OF TODO ##############
@@ -426,7 +427,7 @@ class TrajectoryPlanner():
         '''
         
         rospy.loginfo('Receding Horizon Planning thread started waiting for ROS service calls...')
-        t_last_replan = 0
+        t_last_replan = -np.inf
         while not rospy.is_shutdown():
             ###############################
             #### TODO: Task 3 #############
@@ -457,32 +458,38 @@ class TrajectoryPlanner():
             ###############################
             #### END OF TODO #############
             ###############################
-            #start = 
-            if self.plan_state_buffer.new_data_available and t_last_replan > self.replan_dt and self.planner_ready:
-                current_state = self.plan_state_buffer.readFromRT()
+            state_and_time = self.plan_state_buffer.readFromRT()
+            current_state = state_and_time[:-1]
+            current_time = state_and_time[5]
+            #current_time = rospy.get_rostime().to_sec()
+            t_since_last_replan = current_time - t_last_replan
+            
+            if self.plan_state_buffer.new_data_available and t_since_last_replan > self.replan_dt and self.planner_ready:
+                t_last_replan = current_time
                 previous_policy = self.policy_buffer.readFromRT()
 
                 if previous_policy is not None:
                     # come back to the time stuff
-                    initial_controls = previous_policy.get_ref_controls(rospy.get_rostime().to_sec())
+                    initial_controls = previous_policy.get_ref_controls(current_time)
+                else:
+                    initial_controls = None
 
-                    if self.path_buffer.new_data_available:
-                        self.planner.update_ref_path(self.path_buffer.readFromRT())
+                if self.path_buffer.new_data_available:
+                    self.planner.update_ref_path(self.path_buffer.readFromRT())
+                info = self.planner.plan(current_state, initial_controls)
+
+                status = info.get('status')
+                trajectory = info.get('trajectory')
+                if status == 0:
+                    new_policy = Policy(X = trajectory,
+                                        U = info.get('controls'),
+                                        K = info.get('K_closed_loop'), 
+                                        t0 = rospy.get_rostime().to_sec(), 
+                                        dt = self.planner.dt,
+                                        T = trajectory.shape[1])
                     
-                    info = self.planner.plan(current_state, initial_controls)
-
-                    status = info.get('status')
-                    trajectory = info.get('trajectory')
-                    if status == 0:
-                        new_policy = Policy(X = trajectory, 
-                                            U = info.get('controls'),
-                                            K = info.get('K_closed_loop'), 
-                                            t0 = rospy.get_rostime().to_sec(), 
-                                            dt = self.planner.dt,
-                                            T = trajectory.shape[1])
-
-                        self.policy_buffer.writeFromNonRT(new_policy)
-                
-                        self.trajectory_pub.publish(new_policy.to_msg())  
+                    self.policy_buffer.writeFromNonRT(new_policy)
+            
+                    self.trajectory_pub.publish(new_policy.to_msg())
 
             #time.sleep(0.01)
