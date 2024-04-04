@@ -46,6 +46,8 @@ class DynObstacle():
         #    <ROS_Core/src/Utility/Custom_Msgs/msg/OdometryArray.msg>
         ###############################################
         # Class variable to store the most recent dynamic obstacle's poses
+
+        self.pose_sub = rospy.Subscriber(self.dyn_obs_topic, OdometryArray, self.obs_callback, queue_size=10)
         self.dyn_obstacles = []
         
         ###############################################

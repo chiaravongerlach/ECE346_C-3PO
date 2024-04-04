@@ -50,6 +50,8 @@ class TrajectoryPlanner():
 
         self.setup_service()
 
+        self.static_obstacles_dict = {}
+
         # start planning and control thread
         threading.Thread(target=self.control_thread).start()
         if not self.receding_horizon:
@@ -66,6 +68,8 @@ class TrajectoryPlanner():
         
         self.receding_horizon = get_ros_param('~receding_horizon', False)
         
+        self.obs_topic = get_ros_param('~static_obs_topic', '/Obstacles/Static')
+
         # Read ROS topic names to subscribe 
         self.odom_topic = get_ros_param('~odom_topic', '/slam_pose')
         self.path_topic = get_ros_param('~path_topic', '/Routing/Path')
@@ -124,6 +128,7 @@ class TrajectoryPlanner():
         '''
         self.pose_sub = rospy.Subscriber(self.odom_topic, Odometry, self.odometry_callback, queue_size=10)
         self.path_sub = rospy.Subscriber(self.path_topic, PathMsg, self.path_callback, queue_size=10)
+        self.obs_sub = rospy.Subscriber(self.obs_topic, MarkerArray, self.obs_callback, queue_size=10)
 
     def setup_service(self):
         '''
@@ -192,6 +197,12 @@ class TrajectoryPlanner():
             rospy.loginfo('Path received!')
         except:
             rospy.logwarn('Invalid path received! Move your robot and retry!')
+    
+    def obs_callback(self, obs_msg):
+
+        for marker in obs_msg.markers:
+            id, vertices = get_obstacle_vertices(marker)
+            self.static_obstacles_dict[id] = vertices
 
     @staticmethod
     def compute_control(x, x_ref, u_ref, K_closed_loop):
@@ -425,14 +436,21 @@ class TrajectoryPlanner():
         This function is the main thread for receding horizon planning
         We repeatedly call ILQR to replan the trajectory (policy) once the new state is available
         '''
-        
+
         rospy.loginfo('Receding Horizon Planning thread started waiting for ROS service calls...')
         t_last_replan = -np.inf
         while not rospy.is_shutdown():
+            
+            obstacles_list = []
+
+            for obstacle in self.static_obstacles_dict.values():
+                obstacles_list.append(obstacle)
+            
+            self.planner.update_obstacles(obstacles_list)
+
             ###############################
             #### TODO: Task 3 #############
             ###############################
-
             '''
             Implement the receding horizon planning thread
             Hint: Make sure you are familiar with the <Policy> class in utils/policy.py
@@ -460,12 +478,12 @@ class TrajectoryPlanner():
             ###############################
             current_time = rospy.get_rostime().to_sec()
             t_since_last_replan = current_time - t_last_replan
-            
+            rospy.loginfo(str(self.plan_state_buffer.new_data_available))
             if self.plan_state_buffer.new_data_available and t_since_last_replan > self.replan_dt and self.planner_ready:
                 t_last_replan = current_time
                 current_state = self.plan_state_buffer.readFromRT()[:-1]
                 previous_policy = self.policy_buffer.readFromRT()
-
+                rospy.loginfo("in the iffffff")
                 if previous_policy is not None:
                     # come back to the time stuff
                     initial_controls = previous_policy.get_ref_controls(rospy.get_rostime().to_sec())
@@ -474,6 +492,7 @@ class TrajectoryPlanner():
 
                 if self.path_buffer.new_data_available:
                     self.planner.update_ref_path(self.path_buffer.readFromRT())
+                    rospy.loginfo("update ref path")
                 info = self.planner.plan(current_state, initial_controls)
 
                 status = info.get('status')
@@ -487,7 +506,7 @@ class TrajectoryPlanner():
                                         T = trajectory.shape[1])
                     
                     self.policy_buffer.writeFromNonRT(new_policy)
-            
                     self.trajectory_pub.publish(new_policy.to_msg())
+                    rospy.loginfo("published policy")
 
             #time.sleep(0.01)
