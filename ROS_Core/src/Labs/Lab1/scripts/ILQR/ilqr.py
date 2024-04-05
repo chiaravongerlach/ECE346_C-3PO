@@ -298,7 +298,13 @@ class ILQR():
 				for i in range(T-1):
 					Kt = K[:,:,i]
 					kt = k[:,i]
-					U[:,i] = controls[:,i]+alpha*kt + Kt @ (X[:, i] - trajectory[:, i])
+					state_diff = X[:, i] - trajectory[:, i] 
+					state_diff[3] = state_diff[3] % (2*np.pi)
+
+					if state_diff[3] > np.pi:
+						state_diff[3] -= 2*np.pi
+				
+					U[:,i] = controls[:,i]+alpha*kt + Kt @ (state_diff)
 					X[:,i+1], U[:,i] = self.dyn.integrate_forward_np(X[:,i], U[:,i])
 				
 				path_refs, obs_refs = self.get_references(X)

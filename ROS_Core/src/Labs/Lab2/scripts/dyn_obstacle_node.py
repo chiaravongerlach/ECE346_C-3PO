@@ -47,7 +47,7 @@ class DynObstacle():
         ###############################################
         # Class variable to store the most recent dynamic obstacle's poses
 
-        self.pose_sub = rospy.Subscriber(self.dyn_obs_topic, OdometryArray, self.obs_callback, queue_size=10)
+        self.pose_sub = rospy.Subscriber(self.dyn_obs_topic, OdometryArray, self.obs_cb, queue_size=10)
         self.dyn_obstacles = []
         
         ###############################################
@@ -72,7 +72,7 @@ class DynObstacle():
         self.dy = 0 
         self.allow_lane_change = False
 
-        reconfig_srv = rospy.Service(configConfig, self.reconfig_cb)
+        self.reconfig_srv = Server(configConfig, self.reconfig_cb)
 
         ###############################################
         ############## TODO ###########################
@@ -87,9 +87,9 @@ class DynObstacle():
         # Here is the tutorial for dynamic reconfigure
         # http://wiki.ros.org/ROS/Tutorials/WritingServiceClient%28python%29
         ###############################################
-        
+
         # Create a service server to calculate the FRS
-        reset_srv = rospy.Service('/obstacles/get_frs', GetFRS, self.srv_cb)
+        self.reset_srv = rospy.Service('/obstacles/get_frs', GetFRS, self.srv_cb)
 
 
     def reconfig_cb(self, config, level):
@@ -113,7 +113,7 @@ class DynObstacle():
                 respond.FRS.append(frs2setarray(frs))
         return respond
     
-    def pose_cb(self,  msg):
+    def obs_cb(self,  msg):
         self.dyn_obstacles = msg.odom_list
 
 if __name__ == '__main__':
@@ -124,5 +124,7 @@ if __name__ == '__main__':
     rospy.init_node("DynObstacle")
 
     dynamic_obstacle = DynObstacle()
+
+    rospy.loginfo("dynobs service started")
 
     rospy.spin()

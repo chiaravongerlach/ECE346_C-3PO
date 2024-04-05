@@ -53,12 +53,14 @@ class TrajectoryPlanner():
         self.static_obstacles_dict = {}
 
         rospy.wait_for_service('/obstacles/get_frs')
+        rospy.loginfo("before service caller")
         try:
             self.get_frs = rospy.ServiceProxy('/obstacles/get_frs', GetFRS) 
         except:
             rospy.loginfo("Service caller failed")
 
-
+        rospy.loginfo("past service caller")
+        
         # start planning and control thread
         threading.Thread(target=self.control_thread).start()
         if not self.receding_horizon:
@@ -458,12 +460,12 @@ class TrajectoryPlanner():
                         
             current_time = rospy.get_rostime().to_sec()
 
-            # request = current_time + np.arange(self.planner.T)*self.planner.dt
-            # response = self.get_frs(request)
+            request = current_time + np.arange(self.planner.T)*self.planner.dt
+            response = self.get_frs(request)
             
-            # self.frs_pub.publish(frs_to_msg(response))
+            self.frs_pub.publish(frs_to_msg(response))
             
-            # obstacles_list += frs_to_obstacle(response)
+            obstacles_list += frs_to_obstacle(response)
 
             self.planner.update_obstacles(obstacles_list)
 
@@ -496,12 +498,12 @@ class TrajectoryPlanner():
             #### END OF TODO #############
             ###############################
             t_since_last_replan = current_time - t_last_replan
-            rospy.loginfo(str(self.plan_state_buffer.new_data_available))
+            # rospy.loginfo(str(self.plan_state_buffer.new_data_available))
             if self.plan_state_buffer.new_data_available and t_since_last_replan > self.replan_dt and self.planner_ready:
                 t_last_replan = current_time
                 current_state = self.plan_state_buffer.readFromRT()[:-1]
                 previous_policy = self.policy_buffer.readFromRT()
-                rospy.loginfo("in the iffffff")
+                # rospy.loginfo("in the iffffff")
                 if previous_policy is not None:
                     # come back to the time stuff
                     initial_controls = previous_policy.get_ref_controls(rospy.get_rostime().to_sec())
@@ -510,7 +512,7 @@ class TrajectoryPlanner():
 
                 if self.path_buffer.new_data_available:
                     self.planner.update_ref_path(self.path_buffer.readFromRT())
-                    rospy.loginfo("update ref path")
+                    # rospy.loginfo("update ref path")
                 info = self.planner.plan(current_state, initial_controls)
 
                 status = info.get('status')
@@ -525,6 +527,6 @@ class TrajectoryPlanner():
                     
                     self.policy_buffer.writeFromNonRT(new_policy)
                     self.trajectory_pub.publish(new_policy.to_msg())
-                    rospy.loginfo("published policy")
+                    # rospy.loginfo("published policy")
 
             #time.sleep(0.01)
