@@ -52,6 +52,13 @@ class TrajectoryPlanner():
 
         self.static_obstacles_dict = {}
 
+        rospy.wait_for_service('/obstacles/get_frs')
+        try:
+            self.get_frs = rospy.ServiceProxy('/obstacles/get_frs', GetFRS) 
+        except:
+            rospy.loginfo("Service caller failed")
+
+
         # start planning and control thread
         threading.Thread(target=self.control_thread).start()
         if not self.receding_horizon:
@@ -121,6 +128,9 @@ class TrajectoryPlanner():
 
         # Publisher for the control command
         self.control_pub = rospy.Publisher(self.control_topic, ServoMsg, queue_size=1)
+
+        self.frs_pub = rospy.Publisher('/vis/FRS', MarkerArray, queue_size=1)
+
 
     def setup_subscriber(self):
         '''
@@ -445,7 +455,16 @@ class TrajectoryPlanner():
 
             for obstacle in self.static_obstacles_dict.values():
                 obstacles_list.append(obstacle)
+                        
+            current_time = rospy.get_rostime().to_sec()
+
+            # request = current_time + np.arange(self.planner.T)*self.planner.dt
+            # response = self.get_frs(request)
             
+            # self.frs_pub.publish(frs_to_msg(response))
+            
+            # obstacles_list += frs_to_obstacle(response)
+
             self.planner.update_obstacles(obstacles_list)
 
             ###############################
@@ -476,7 +495,6 @@ class TrajectoryPlanner():
             ###############################
             #### END OF TODO #############
             ###############################
-            current_time = rospy.get_rostime().to_sec()
             t_since_last_replan = current_time - t_last_replan
             rospy.loginfo(str(self.plan_state_buffer.new_data_available))
             if self.plan_state_buffer.new_data_available and t_since_last_replan > self.replan_dt and self.planner_ready:
