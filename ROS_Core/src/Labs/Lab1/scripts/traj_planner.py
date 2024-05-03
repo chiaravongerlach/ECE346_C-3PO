@@ -6,6 +6,7 @@ import numpy as np
 import os
 import time
 import pickle
+from scipy.ndimage import gaussian_filter1d
 
 from utils import RealtimeBuffer, get_ros_param, Policy, GeneratePwm, get_obstacle_vertices
 from utils import frs_to_obstacle, frs_to_msg
@@ -246,6 +247,24 @@ class TrajectoryPlanner():
                     
                     path_msg.poses[w_index].pose.position.x = projected_point[0]
                     path_msg.poses[w_index].pose.position.y = projected_point[1]
+
+        # Apply smoothing filter
+
+        x_coords = np.array([pose.pose.position.x for pose in path_msg.poses])
+        y_coords = np.array([pose.pose.position.y for pose in path_msg.poses])
+
+        sigma = 2.0  # Adjust this based on how much smoothing you want
+
+        # Apply Gaussian filter to smooth the coordinates
+        smoothed_x = gaussian_filter1d(x_coords, sigma=sigma)
+        smoothed_y = gaussian_filter1d(y_coords, sigma=sigma)
+
+        
+        for i in range(len(smoothed_x)):
+            path_msg.poses[i].pose.position.x = smoothed_x[i]
+            path_msg.poses[i].pose.position.y = smoothed_y[i]
+
+        print(len(path_msg.poses))
                         
         self.path_modified_pub.publish(path_msg)
                 
