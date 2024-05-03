@@ -253,7 +253,7 @@ class TrajectoryPlanner():
         x_coords = np.array([pose.pose.position.x for pose in path_msg.poses])
         y_coords = np.array([pose.pose.position.y for pose in path_msg.poses])
 
-        sigma = 2.0  # Adjust this based on how much smoothing you want
+        sigma = 2.0
 
         # Apply Gaussian filter to smooth the coordinates
         smoothed_x = gaussian_filter1d(x_coords, sigma=sigma)
