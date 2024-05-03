@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from functools import partial
-
+from jaxlib.xla_extension import ArrayImpl
 import jax
 from jax import numpy as jnp
 import numpy as np
@@ -24,7 +24,7 @@ class SingleObstacleCost(BaseCost):
 
     @partial(jax.jit, static_argnums=(0,))
     def get_running_cost(
-			self, state: jax.Array, ctrl: jax.Array, ref: np.ndarray
+			self, state: ArrayImpl, ctrl: ArrayImpl, ref: np.ndarray
 	) -> float:
         '''
         Given a state, control, and time index, return the cost.
@@ -53,7 +53,7 @@ class SingleObstacleCost(BaseCost):
         dis = jnp.linalg.norm(diff)
         y = jnp.where(dis >= 1e-4, dis, 1e-4)
 
-        y= -1*jnp.sign(dis_ref)*y   
+        y= -1*jnp.sign(dis_ref)*y 
 
         # Do not calrlate gradient w.r.t velocity
         v_no_grad = jax.lax.stop_gradient(state[2])
@@ -66,7 +66,7 @@ class ObstacleCost():
         self.single_obstacle_cost = SingleObstacleCost(config)
         
     def get_traj_cost(
-			self, trajectory: jax.Array, controls: jax.Array, obs_refs: np.ndarray
+			self, trajectory: ArrayImpl, controls: ArrayImpl, obs_refs: np.ndarray
 	) -> float:
         '''
 		Given a state, control, and time index, return the sum of the cost.
@@ -88,8 +88,8 @@ class ObstacleCost():
         return cost
 
     def get_derivatives_jax(
-            self, trajectory: jax.Array, controls: jax.Array, obs_refs: jax.Array
-    ) -> jax.Array:
+            self, trajectory: ArrayImpl, controls: ArrayImpl, obs_refs: ArrayImpl
+    ) -> ArrayImpl:
         
         q = 0
         r = 0

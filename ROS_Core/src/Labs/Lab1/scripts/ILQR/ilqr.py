@@ -1,5 +1,5 @@
 from typing import Tuple, Optional, Dict, Union
-
+from jaxlib.xla_extension import ArrayImpl
 import time
 import os
 import numpy as np
@@ -91,7 +91,7 @@ class ILQR():
 
 		x_init = np.array([0.0, -1.0, 1, 0, 0])
 		print('Start warm up ILQR...')
-		self.plan(x_init)
+		self.plan(x_init, verbose=False)
 		print('ILQR warm up finished.')
 		
 		self.ref_path = None
@@ -116,7 +116,7 @@ class ILQR():
 		for vertices in vertices_list:
 			self.obstacle_list.append(Obstacle(vertices))
 
-	def get_references(self, trajectory: Union[np.ndarray, jax.Array]):
+	def get_references(self, trajectory: Union[np.ndarray, ArrayImpl]):
 		'''
 		Given the trajectory, get the path reference and obstacle information.
 		Args:
@@ -170,7 +170,6 @@ class ILQR():
 
 		# Get the initial cost of the trajectory.
 		J = self.cost.get_traj_cost(trajectory, controls, path_refs, obs_refs)
-
 
 		##########################################################################
 		# TODO 1: Implement the ILQR algorithm. Feel free to add any helper functions.
@@ -233,107 +232,15 @@ class ILQR():
 		
 		########################### #END of TODO 1 #####################################
 
-
-
-		def backward_pass_robust(trajectory, controls, reg, path_refs, obs_refs):
-			q, r, Q, R, H = self.cost.get_derivatives_np(trajectory, controls, path_refs, obs_refs)
-			A, B = self.dyn.get_jacobian_np(trajectory, controls)
-
-			T = trajectory.shape[1]
-
-			k_open_loop = np.zeros((2, T))
-			K_closed_loop = np.zeros((2, 5, T))
-			# derivative of value function at final step
-			p = q[:,T-1]
-			P = Q[:,:,T-1]
-			t = T-2 # TODO: This might be a problem
-
-			while t>=0:
-				Q_x = q[:,t] + A[:,:,t].T @ p
-				Q_u = r[:,t] + B[:,:,t].T @ p
-				Q_xx = Q[:,:,t] + A[:,:,t].T @ P @ A[:,:,t]
-				Q_uu = R[:,:,t] + B[:,:,t].T @ P @ B[:,:,t]
-				Q_ux = H[:,:,t] + B[:,:,t].T @ P @ A[:,:,t]
-
-				# Add regularization
-				reg_matrix = reg*np.eye(5)
-				Q_uu_reg = R[:,:,t] + B[:,:,t].T @ (P+reg_matrix) @ B[:,:,t]
-				Q_ux_reg = H[:,:,t] + B[:,:,t].T @ (P+reg_matrix) @ A[:,:,t]
-
-				# check if Q_uu_reg is PD
-				if not np.all(np.linalg.eigvals(Q_uu_reg) > 0) and reg < 1e5:
-					reg *= 5
-					t = T-2
-					p = q[:,T-1]
-					P = Q[:,:,T-1] # TODO: This might be a problem
-					continue
-
-				Q_uu_reg_inv = np.linalg.inv(Q_uu_reg)
-				# Calculate policy
-				k = -Q_uu_reg_inv@Q_u
-				K = -Q_uu_reg_inv@Q_ux_reg
-				k_open_loop[:,t] = k
-				K_closed_loop[:, :, t] = K
-
-				# Update value function derivative for the previous time step
-				p = Q_x + K.T @ Q_uu @ k + K.T@Q_u + Q_ux.T@k
-				P = Q_xx + K.T @ Q_uu @ K + K.T@Q_ux + Q_ux.T@K
-				t -= 1
-			reg = max(1e-5, reg*0.5)
-			return K_closed_loop, k_open_loop, reg
-
-		converged = False
-		status = -1
-		while not converged:
-			K, k, reg = backward_pass_robust(trajectory, controls, self.reg_init, path_refs, obs_refs)
-			
-			alpha = 1
-			changed = False
-			for _ in range(3):
-				X = np.zeros_like(trajectory)
-				U = np.zeros_like(controls)
-
-				X[:,0] = trajectory[:,0]
-				T = trajectory.shape[1]
-				for i in range(T-1):
-					Kt = K[:,:,i]
-					kt = k[:,i]
-					state_diff = X[:, i] - trajectory[:, i] 
-					state_diff[3] = state_diff[3] % (2*np.pi)
-
-					if state_diff[3] > np.pi:
-						state_diff[3] -= 2*np.pi
-				
-					U[:,i] = controls[:,i]+alpha*kt + Kt @ (state_diff)
-					X[:,i+1], U[:,i] = self.dyn.integrate_forward_np(X[:,i], U[:,i])
-				
-				path_refs, obs_refs = self.get_references(X)
-				J_new = self.cost.get_traj_cost(X, U, path_refs, obs_refs)
-				if J_new <= J:
-					if np.abs(J - J_new) < 1e-3:
-						converged = True
-					J = J_new
-					trajectory = X
-					controls = U
-					changed = True
-					break
-				alpha *= 0.1
-			
-			if converged:
-				status = 0
-				break
-			if not changed:
-				break
-
-
 		t_process = time.time() - t_start
 		solver_info = dict(
 				t_process=t_process, # Time spent on planning
 				trajectory = trajectory,
 				controls = controls,
-				status=status, 	
-				K_closed_loop=K, 
-				k_open_loop=k
+				status=None, #	TODO: Fill this in
+				K_closed_loop=None, # TODO: Fill this in
+				k_open_loop=None # TODO: Fill this in
+				# Optional TODO: Fill in other information you want to return
 		)
 		return solver_info
 

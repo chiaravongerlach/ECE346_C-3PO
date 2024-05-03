@@ -57,5 +57,19 @@
     
     <node type="rqt_gui" name="rqt_gui" pkg="rqt_gui" 
         args="--perspective-file $(find racecar_interface)/rviz/rqt_sim.perspective"/>
+
+    <node pkg="racecar_planner" type="traj_planning_node.py" name="traj_planning" output="$(arg output)">
+        <param name="odom_topic"           value="$(arg odom_topic)" />
+        <param name="control_topic"        value="$(arg control_topic)" />
+        <param name="obstacle_topic"       value="/Prediction/Obstacles" />
+        <param name="traj_topic"           value="/Planning/Trajectory" />
+        <param name="path_topic"           value="/Routing/Path"  />
+        <param name="package_path"         value="$(find racecar_planner)" />
+        <param name="simulation"           value="True" />
+        <param name="receding_horizon"            value="true" />
+        <param name="replan_dt"            value="0.1" />
+        <param name="ilqr_params_file"     value="configs/lab2_task1.yaml" />
+        <param name="PWM_model"            value="$(find racecar_planner)/configs/mlp_model.sav" />
+    </node>
     
 </launch>

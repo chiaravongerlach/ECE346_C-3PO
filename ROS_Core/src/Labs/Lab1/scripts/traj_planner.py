@@ -5,26 +5,24 @@ import rospy
 import numpy as np
 import os
 import time
-import queue
+import pickle
 
-from utils import RealtimeBuffer, Policy, GeneratePwm
+from utils import RealtimeBuffer, get_ros_param, Policy, GeneratePwm, get_obstacle_vertices
+from utils import frs_to_obstacle, frs_to_msg
 from ILQR import RefPath
-from ILQR import ILQR
+from ILQR import ILQR_jax as ILQR
 
-from racecar_msgs.msg import ServoMsg
+from racecar_msgs.msg import ServoMsg, OdometryArray
 from racecar_planner.cfg import plannerConfig
+from visualization_msgs.msg import MarkerArray
 
 from dynamic_reconfigure.server import Server
 from tf.transformations import euler_from_quaternion
 from nav_msgs.msg import Odometry
 from nav_msgs.msg import Path as PathMsg # used to display the trajectory on RVIZ
 from std_srvs.srv import Empty, EmptyResponse
-
-# You will use those for lab2   
-from racecar_msgs.msg import OdometryArray
-from utils import frs_to_obstacle, frs_to_msg, get_obstacle_vertices, get_ros_param
-from visualization_msgs.msg import MarkerArray
 from racecar_obs_detection.srv import GetFRS, GetFRSResponse
+import queue
 
 class TrajectoryPlanner():
     '''
@@ -35,8 +33,12 @@ class TrajectoryPlanner():
         # Indicate if the planner is used to generate a new trajectory
         self.update_lock = threading.Lock()
         self.latency = 0.0
-        
+
         self.read_parameters()
+
+        map_file =  os.path.dirname(os.path.realpath(__file__)) + "/track.pkl"
+        with open(map_file, 'rb') as f:
+            self.lanelet_map = pickle.load(f)
         
         # Initialize the PWM converter
         self.pwm_converter = GeneratePwm()
@@ -50,24 +52,13 @@ class TrajectoryPlanner():
 
         self.setup_service()
 
-        self.static_obstacles_dict = {}
-
-        rospy.wait_for_service('/obstacles/get_frs')
-        rospy.loginfo("before service caller")
-        try:
-            self.get_frs = rospy.ServiceProxy('/obstacles/get_frs', GetFRS) 
-        except:
-            rospy.loginfo("Service caller failed")
-
-        rospy.loginfo("past service caller")
-        
         # start planning and control thread
         threading.Thread(target=self.control_thread).start()
         if not self.receding_horizon:
             threading.Thread(target=self.policy_planning_thread).start()
         else:
             threading.Thread(target=self.receding_horizon_planning_thread).start()
-    
+
     def read_parameters(self):
         '''
         This function reads the parameters from the parameter server
@@ -77,16 +68,14 @@ class TrajectoryPlanner():
         
         self.receding_horizon = get_ros_param('~receding_horizon', False)
         
-        self.obs_topic = get_ros_param('~static_obs_topic', '/Obstacles/Static')
-
         # Read ROS topic names to subscribe 
         self.odom_topic = get_ros_param('~odom_topic', '/slam_pose')
         self.path_topic = get_ros_param('~path_topic', '/Routing/Path')
         
-        
         # Read ROS topic names to publish
         self.control_topic = get_ros_param('~control_topic', '/control/servo_control')
         self.traj_topic = get_ros_param('~traj_topic', '/Planning/Trajectory')
+        self.static_obs_topic = rospy.get_param('~static_obs_topic', '/Obstacles/Static')
         
         # Read the simulation flag, 
         # if the flag is true, we are in simulation 
@@ -118,7 +107,9 @@ class TrajectoryPlanner():
         self.control_state_buffer = RealtimeBuffer()
         self.policy_buffer = RealtimeBuffer()
         self.path_buffer = RealtimeBuffer()
-        # Indicate if the planner is ready to generate a new trajectory
+        self.static_obstacle_dict = {}
+        self.static_obstacle_centers_dict = {}
+        self.static_obstacle_lanelet_dict = {}
         self.planner_ready = True
 
     def setup_publisher(self):
@@ -128,11 +119,14 @@ class TrajectoryPlanner():
         # Publisher for the planned nominal trajectory for visualization
         self.trajectory_pub = rospy.Publisher(self.traj_topic, PathMsg, queue_size=1)
 
+        # Publisher for the modified trajectory # TODO
+        self.path_modified_pub = rospy.Publisher('/Planning/Modified_Path', PathMsg, queue_size=1)
+
         # Publisher for the control command
         self.control_pub = rospy.Publisher(self.control_topic, ServoMsg, queue_size=1)
-
+        
+        # Publisher for FRS visualization
         self.frs_pub = rospy.Publisher('/vis/FRS', MarkerArray, queue_size=1)
-
 
     def setup_subscriber(self):
         '''
@@ -140,16 +134,38 @@ class TrajectoryPlanner():
         '''
         self.pose_sub = rospy.Subscriber(self.odom_topic, Odometry, self.odometry_callback, queue_size=10)
         self.path_sub = rospy.Subscriber(self.path_topic, PathMsg, self.path_callback, queue_size=10)
-        self.obs_sub = rospy.Subscriber(self.obs_topic, MarkerArray, self.obs_callback, queue_size=10)
+        self.static_obs_sub = rospy.Subscriber(self.static_obs_topic, MarkerArray, self.static_obstacle_callback, queue_size=10)
 
+    def static_obstacle_callback(self, msg):
+        '''
+        Static obstacle callback function
+        '''
+
+        # Have no idea why but commenting this fixes it
+        # if self.simulation:
+        #     self.static_obstacle_dict.clear()
+        #     self.static_obstacle_centers_dict.clear()
+            
+        for obs in msg.markers:
+            id, vertices = get_obstacle_vertices(obs)
+            self.static_obstacle_dict[id] = vertices
+            obs_center =[obs.pose.position.x, obs.pose.position.y]
+            self.static_obstacle_centers_dict[id] = obs_center
+
+            if not id in self.static_obstacle_lanelet_dict:
+                obs_lanelet, _ = self.lanelet_map.get_closest_lanelet(obs_center)
+                self.static_obstacle_lanelet_dict[id] = obs_lanelet.id
+        
     def setup_service(self):
         '''
         Set up ros service
         '''
-        self.start_srv = rospy.Service('/Planning/Start', Empty, self.start_planning_cb)
-        self.stop_srv = rospy.Service('/Planning/Stop', Empty, self.stop_planning_cb)
+        self.start_srv = rospy.Service('/planning/start_planning', Empty, self.start_planning_cb)
+        self.stop_srv = rospy.Service('/planning/stop_planning', Empty, self.stop_planning_cb)
         
         self.dyn_server = Server(plannerConfig, self.reconfigure_callback)
+
+        self.get_frs = rospy.ServiceProxy('/obstacles/get_frs', GetFRS)
 
     def start_planning_cb(self, req):
         '''
@@ -188,6 +204,52 @@ class TrajectoryPlanner():
         self.control_state_buffer.writeFromNonRT(odom_msg)
     
     def path_callback(self, path_msg):
+        #self.path_modified_pub.publish(path_msg)
+        # Modify path
+        
+        for w_index, waypoint in enumerate(path_msg.poses):
+            if w_index < 5:
+                continue
+
+            pos_x = waypoint.pose.position.x
+            pos_y = waypoint.pose.position.y
+
+            closest_distance = np.inf
+            closest_obs_id = None
+            #rospy.loginfo(len(self.static_obstacle_dict))
+            
+
+            for id, obs in self.static_obstacle_centers_dict.items():
+                #obs = np.mean(obs[:, :2], axis=0)
+        
+                distance = (pos_x - obs[0])**2 + (pos_y - obs[1])**2
+                if distance < closest_distance:
+                    closest_distance = distance
+                    closest_obs_id = id
+            #print(len(self.static_obstacle_dict))
+            if closest_distance < 2:
+                #obs_lanelet, obs_s = self.lanelet_map.get_closest_lanelet(closest_obs)
+                
+                waypoint_lanelet, waypoint_s = self.lanelet_map.get_closest_lanelet([pos_x, pos_y])
+
+                if self.static_obstacle_lanelet_dict[closest_obs_id] == waypoint_lanelet.id:
+                    if waypoint_lanelet.left:
+                        new_lanelet_id = waypoint_lanelet.left[0]
+                    elif waypoint_lanelet.right:
+                        new_lanelet_id = waypoint_lanelet.right[0]
+                    else:
+                        continue
+                    new_lanelet = self.lanelet_map.lanelets[new_lanelet_id]
+
+                    s, _ = new_lanelet.center_line.spline.projectPoint([pos_x, pos_y])
+                    projected_point = new_lanelet.center_line.spline.getValue(s)
+                    
+                    path_msg.poses[w_index].pose.position.x = projected_point[0]
+                    path_msg.poses[w_index].pose.position.y = projected_point[1]
+                        
+        self.path_modified_pub.publish(path_msg)
+                
+
         x = []
         y = []
         width_L = []
@@ -209,12 +271,6 @@ class TrajectoryPlanner():
             rospy.loginfo('Path received!')
         except:
             rospy.logwarn('Invalid path received! Move your robot and retry!')
-    
-    def obs_callback(self, obs_msg):
-
-        for marker in obs_msg.markers:
-            id, vertices = get_obstacle_vertices(marker)
-            self.static_obstacles_dict[id] = vertices
 
     @staticmethod
     def compute_control(x, x_ref, u_ref, K_closed_loop):
@@ -233,25 +289,17 @@ class TrajectoryPlanner():
             steer_rate: float, steering rate command [rad/s]
         '''
 
-        ###############################
-        #### TODO: Task 2 #############
-        ###############################
-        # Implement your control law here using ILQR policy
+        ##### TODO: Implement your control law here ########
         # Hint: make sure that the difference in heading is between [-pi, pi]
-
-        diff = x - x_ref
-        diff[3] = diff[3] % (2*np.pi)
-        if diff[3] > np.pi:
-            diff[3] -= 2*np.pi
-        u = u_ref + K_closed_loop@(diff)
+        dx = x - x_ref
+        dx[3] = np.mod(dx[3] + np.pi, 2 * np.pi) - np.pi
+        u = u_ref + K_closed_loop @ dx
         accel = u[0]
-
         steer_rate = u[1]
-
-        ##### END OF TODO ##############
+        ##### END OF TODO ####################################
 
         return accel, steer_rate
-  
+
     def control_thread(self):
         '''
         Main control thread to publish control command
@@ -284,7 +332,6 @@ class TrajectoryPlanner():
             state_cur = None
             policy = self.policy_buffer.readFromRT()
             
-            # take the latency of publish into the account
             if self.simulation:
                 t_act = rospy.get_rostime().to_sec()
             else:
@@ -292,9 +339,11 @@ class TrajectoryPlanner():
                 t_act = rospy.get_rostime().to_sec() + self.latency 
                 self.update_lock.release()
             
+
             # check if there is new state available
             if self.control_state_buffer.new_data_available:
                 odom_msg = self.control_state_buffer.readFromRT()
+                
                 t_slam = odom_msg.header.stamp.to_sec()
                 
                 u = np.zeros(3)
@@ -315,7 +364,7 @@ class TrajectoryPlanner():
                             psi,
                             u[1]
                         ])
-               
+
                 # predict the current state use past control command
                 for i in range(u_queue.qsize()):
                     u_next = u_queue.queue[i]
@@ -378,12 +427,83 @@ class TrajectoryPlanner():
             # end of while loop
             rate.sleep()
 
+    def receding_horizon_planning_thread(self):
+        '''
+        This function is the main thread for receding horizon planning
+        We repeatedly call ILQR to replan the trajectory (policy) once the new state is available
+        '''
+        
+        rospy.loginfo('Receding Horizon Planning thread started waiting for ROS service calls...')
+        t_last_replan = 0
+        while not rospy.is_shutdown():
+            # determine if we need to replan
+            if self.plan_state_buffer.new_data_available:
+                state_cur = self.plan_state_buffer.readFromRT()
+                
+                t_cur = state_cur[-1] # the last element is the time
+                dt = t_cur - t_last_replan
+                
+                # Do replanning
+                if dt >= self.replan_dt:
+                    # Get the initial controls for hot start
+                    init_controls = None
+
+                    original_policy = self.policy_buffer.readFromRT()
+                    if original_policy is not None:
+                        init_controls = original_policy.get_ref_controls(t_cur)
+
+                    # Update the path
+                    if self.path_buffer.new_data_available:
+                        new_path = self.path_buffer.readFromRT()
+                        self.planner.update_ref_path(new_path)
+                    
+                    # Update the static obstacles
+                    obstacles_list = []
+                    for vertices in self.static_obstacle_dict.values():
+                        obstacles_list.append(vertices)
+                    # update dynamic obstacles
+                    try:
+                        t_list= t_cur + np.arange(self.planner.T)*self.planner.dt
+                        frs_respond = self.get_frs(t_list)
+                        obstacles_list.extend(frs_to_obstacle(frs_respond))
+                        self.frs_pub.publish(frs_to_msg(frs_respond))
+                    except:
+                        rospy.logwarn_once('FRS server not available!')
+                        frs_respond = None
+                        
+                    self.planner.update_obstacles(obstacles_list)
+                    
+                    # Replan use ilqr
+                    new_plan = self.planner.plan(state_cur[:-1], init_controls, verbose=False)
+                    
+                    plan_status = new_plan['status']
+                    if plan_status == -1:
+                        rospy.logwarn_once('No path specified!')
+                        continue
+                    
+                    if self.planner_ready:
+                        # If stop planning is called, we will not write to the buffer
+                        new_policy = Policy(X = new_plan['trajectory'], 
+                                            U = new_plan['controls'],
+                                            K = new_plan['K_closed_loop'], 
+                                            t0 = t_cur, 
+                                            dt = self.planner.dt,
+                                            T = self.planner.T)
+                        
+                        self.policy_buffer.writeFromNonRT(new_policy)
+                        
+                        # publish the new policy for RVIZ visualization
+                        self.trajectory_pub.publish(new_policy.to_msg())        
+                        t_last_replan = t_cur
+                    
+                    
+
     def policy_planning_thread(self):
         '''
         This function is the main thread for open loop planning
         We plan entire trajectory (policy) everytime when a new reference path is available
         '''
-        rospy.loginfo('Policy Planning thread started waiting for ROS service calls...')
+        rospy.loginfo('Open Loop Planning thread started waiting for ROS service calls...')
         while not rospy.is_shutdown():
             # determine if we need to replan
             if self.path_buffer.new_data_available and self.planner_ready:
@@ -410,7 +530,7 @@ class TrajectoryPlanner():
                 # stop when the progress is not increasing
                 while (progress - prev_progress)*new_path.length > 1e-3: # stop when the progress is not increasing
                     nominal_trajectory.append(state)
-                    new_plan = self.planner.plan(state, None)#, verbose=False)
+                    new_plan = self.planner.plan(state, None, verbose=False)
                     nominal_controls.append(new_plan['controls'][:,0])
                     K_closed_loop.append(new_plan['K_closed_loop'][:,:,0])
                     
@@ -442,91 +562,3 @@ class TrajectoryPlanner():
                 
                 # publish the new policy for RVIZ visualization
                 self.trajectory_pub.publish(new_policy.to_msg())        
-
-    def receding_horizon_planning_thread(self):
-        '''
-        This function is the main thread for receding horizon planning
-        We repeatedly call ILQR to replan the trajectory (policy) once the new state is available
-        '''
-
-        rospy.loginfo('Receding Horizon Planning thread started waiting for ROS service calls...')
-        t_last_replan = -np.inf
-        while not rospy.is_shutdown():
-            
-            obstacles_list = []
-
-            for obstacle in self.static_obstacles_dict.values():
-                obstacles_list.append(obstacle)
-                        
-            current_time = rospy.get_rostime().to_sec()
-
-            request = current_time + np.arange(self.planner.T)*self.planner.dt
-            response = self.get_frs(request)
-            
-            self.frs_pub.publish(frs_to_msg(response))
-            
-            obstacles_list += frs_to_obstacle(response)
-
-            self.planner.update_obstacles(obstacles_list)
-
-            ###############################
-            #### TODO: Task 3 #############
-            ###############################
-            '''
-            Implement the receding horizon planning thread
-            Hint: Make sure you are familiar with the <Policy> class in utils/policy.py
-            1. Determine if we need to replan by
-                - checking if there is new data in the plan_state_buffer using 
-                    <self.plan_state_buffer.new_data_available>
-                - checking if the time since <t_last_replan> is larger than <self.replan_dt>
-                - checking if <self.planner_ready> is True
-            2. If we need to replan, 
-                - Get the current state from the plan_state_buffer using <self.plan_state_buffer.readFromRT>
-                - Get the previous policy from the policy_buffer using <self.policy_buffer.readFromRT>
-                - Get the initial controls for hot start if there is a previous policy
-                    you can use helper function <get_ref_controls> in the <Policy> class
-                - Check if there is a new path in the path_buffer using <self.path_buffer.new_data_available>.
-                    if true, Update the reference path in ILQR using <self.planner.update_ref_path(new path)>
-                - Replan using ILQR 
-            3. If the replan is successful,
-                - Create a new <Policy> object using your new plan
-                - Write the new policy to the policy buffer using <self.policy_buffer.writeFromNonRT>
-                - Publish the new policy for RVIZ visualization
-                    for example: self.trajectory_pub.publish(new_policy.to_msg())       
-            '''
-            ###############################
-            #### END OF TODO #############
-            ###############################
-            t_since_last_replan = current_time - t_last_replan
-            # rospy.loginfo(str(self.plan_state_buffer.new_data_available))
-            if self.plan_state_buffer.new_data_available and t_since_last_replan > self.replan_dt and self.planner_ready:
-                t_last_replan = current_time
-                current_state = self.plan_state_buffer.readFromRT()[:-1]
-                previous_policy = self.policy_buffer.readFromRT()
-                # rospy.loginfo("in the iffffff")
-                if previous_policy is not None:
-                    # come back to the time stuff
-                    initial_controls = previous_policy.get_ref_controls(rospy.get_rostime().to_sec())
-                else:
-                    initial_controls = None
-
-                if self.path_buffer.new_data_available:
-                    self.planner.update_ref_path(self.path_buffer.readFromRT())
-                    # rospy.loginfo("update ref path")
-                info = self.planner.plan(current_state, initial_controls)
-
-                status = info.get('status')
-                trajectory = info.get('trajectory')
-                if status == 0:
-                    new_policy = Policy(X = trajectory,
-                                        U = info.get('controls'),
-                                        K = info.get('K_closed_loop'), 
-                                        t0 = rospy.get_rostime().to_sec(), 
-                                        dt = self.planner.dt,
-                                        T = trajectory.shape[1])
-                    
-                    self.policy_buffer.writeFromNonRT(new_policy)
-                    self.trajectory_pub.publish(new_policy.to_msg())
-                    # rospy.loginfo("published policy")
-
-            #time.sleep(0.01)
