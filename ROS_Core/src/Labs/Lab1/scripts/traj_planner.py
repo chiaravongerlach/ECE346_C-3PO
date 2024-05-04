@@ -16,6 +16,7 @@ from ILQR import ILQR_jax as ILQR
 from racecar_msgs.msg import ServoMsg, OdometryArray
 from racecar_planner.cfg import plannerConfig
 from visualization_msgs.msg import MarkerArray
+from geometry_msgs.msg import PoseStamped
 
 from dynamic_reconfigure.server import Server
 from tf.transformations import euler_from_quaternion
@@ -111,6 +112,10 @@ class TrajectoryPlanner():
         self.static_obstacle_dict = {}
         self.static_obstacle_centers_dict = {}
         self.static_obstacle_lanelet_dict = {}
+        self.current_goal_id = None
+        self.current_goal_pos = None
+        self.goal_order = get_ros_param('~/goal_order', None)
+        self.start_count = 0
         self.planner_ready = True
 
     def setup_publisher(self):
@@ -128,6 +133,9 @@ class TrajectoryPlanner():
         
         # Publisher for FRS visualization
         self.frs_pub = rospy.Publisher('/vis/FRS', MarkerArray, queue_size=1)
+
+        # Publisher for new goals
+        self.goal_pub = rospy.Publisher('/move_base_simple/goal', PoseStamped, queue_size=1)
 
     def setup_subscriber(self):
         '''
@@ -198,6 +206,35 @@ class TrajectoryPlanner():
         '''
         Subscriber callback function of the robot pose
         '''
+        if self.planner_ready:
+            if self.start_count > 50:
+                changing_goal = False
+                if self.current_goal_id is None:
+                    changing_goal = True
+                    self.current_goal_id = 0
+                    #print('~/goal_' + self.goal_order[0])
+                    self.current_goal_pos = get_ros_param(f'~/goal_{self.goal_order[0]}', None)
+                else:
+                    current_x = odom_msg.pose.pose.position.x
+                    current_y = odom_msg.pose.pose.position.y
+
+                    if ((self.current_goal_pos[0] - current_x)**2 + (self.current_goal_pos[1] - current_y)**2) < 1:
+                        changing_goal = True
+                        self.current_goal_id += 1
+                        if self.current_goal_id >= len(self.goal_order):
+                            self.current_goal_id = 0
+                        self.current_goal_pos = get_ros_param(f'~/goal_{self.goal_order[self.current_goal_id]}', None)
+
+                if changing_goal:
+                    goal_msg = PoseStamped()
+                    goal_msg.pose.position.x = self.current_goal_pos[0]
+                    goal_msg.pose.position.y = self.current_goal_pos[1]
+                    goal_msg.header.frame_id = 'map'
+                    self.goal_pub.publish(goal_msg)
+                    print("testing!")
+            else:
+                self.start_count += 1
+            
         # Add the current state to the buffer
         # Controller thread will read from the buffer
         # Then it will be processed and add to the planner buffer 
@@ -253,7 +290,7 @@ class TrajectoryPlanner():
         x_coords = np.array([pose.pose.position.x for pose in path_msg.poses])
         y_coords = np.array([pose.pose.position.y for pose in path_msg.poses])
 
-        sigma = 2.0
+        sigma = 3.0
 
         # Apply Gaussian filter to smooth the coordinates
         smoothed_x = gaussian_filter1d(x_coords, sigma=sigma)

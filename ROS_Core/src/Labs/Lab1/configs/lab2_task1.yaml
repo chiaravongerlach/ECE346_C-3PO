@@ -57,7 +57,7 @@ a_max: 5.0 # maximum acceleration
 a_min: -5.0 # minimum acceleration
 
 # reference velocity
-v_ref: 0.5 # reference velocity
+v_ref: 0.4 # reference velocity
 ####################################################
 ########## Parameters for ILQR COST ################
 ####################################################
@@ -68,7 +68,7 @@ v_ref: 0.5 # reference velocity
 path_weight: 100.0 # weight for the path deviation cost
 
 # Velocity Cost
-vel_weight: 4.0 # weight for the velocity cost
+vel_weight: 50.0 # weight for the velocity cost
 
 # Speed Limit Cost
 vel_limit_a: 10.0 # parameter for speed limit cost
@@ -88,13 +88,13 @@ progress_weight: 0  # weight for the progress cost
 
 # Lane Boundary Cost
 lane_boundary_a: 100.0 # parameter for lane boundary cost
-lane_boundary_b: 20.0 # parameter for ExpLinear Cost
+lane_boundary_b: 10.0 # parameter for ExpLinear Cost
 
 ########        Control Cost          ############
 # those value should not be too small
 ctrl_cost_accel_weight: 1.0
-ctrl_cost_steer_weight: 0.5
+ctrl_cost_steer_weight: 0.1
 
 ########        Obstacle Cost          ############
 obs_a: 1000 # parameter for obstacle cost
-obs_b: 100 # parameter for ExpLinear Cost
+obs_b: 0 # parameter for ExpLinear Cost
