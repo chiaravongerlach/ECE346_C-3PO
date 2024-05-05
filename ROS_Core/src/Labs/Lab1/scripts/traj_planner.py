@@ -43,6 +43,9 @@ class TrajectoryPlanner():
     '''
 
     def __init__(self):
+        self.user_input = [0, 0]
+        self.override_user = False
+
         # Indicate if the planner is used to generate a new trajectory
         self.update_lock = threading.Lock()
         self.latency = 0.0
@@ -66,29 +69,29 @@ class TrajectoryPlanner():
         self.setup_service()
 
         # Read ROS topic names to subscribe COMMENT OUT DURING SIM
-        self.odom_topic = get_ros_param('~odom_topic', '/slam_pose')
-        self.static_obs_tag_topic = get_ros_param('~static_tag_topic', '/static_tag')
-        self.static_obs_size = get_ros_param('~static_obs_size', 0.2)
-        self.static_obs_topic = get_ros_param('~static_obs_topic', '/Obstacles/Static')
+        # self.odom_topic = get_ros_param('~odom_topic', '/slam_pose')
+        # self.static_obs_tag_topic = get_ros_param('~static_tag_topic', '/static_tag')
+        # self.static_obs_size = get_ros_param('~static_obs_size', 0.2)
+        # self.static_obs_topic = get_ros_param('~static_obs_topic', '/Obstacles/Static')
 
-        self.T_rob2cam = np.array([[1.0, 0.0, 0.0, -0.357], # camera center offset
-                                    [0.0, 1.0, 0.0, -0.06],
-                                    [0.0, 0.0, 1.0, 0], #wheelbase
-                                    [0.0, 0.0, 0.0, 1.0]]) # camera to rear axis transform
-        self.T_cam2rob = np.linalg.inv(self.T_rob2cam)
+        # self.T_rob2cam = np.array([[1.0, 0.0, 0.0, -0.357], # camera center offset
+        #                             [0.0, 1.0, 0.0, -0.06],
+        #                             [0.0, 0.0, 1.0, 0], #wheelbase
+        #                             [0.0, 0.0, 0.0, 1.0]]) # camera to rear axis transform
+        # self.T_cam2rob = np.linalg.inv(self.T_rob2cam)
 
-        self.T_obs2tag = np.array([[1.0, 0.0, 0.0, 0.0],
-                                    [0.0, 1.0, 0.0, 0.0],
-                                    [0.0, 0.0, 1.0, -self.static_obs_size/2.0],
-                                    [0.0, 0.0, 0.0, 1.0]])  
+        # self.T_obs2tag = np.array([[1.0, 0.0, 0.0, 0.0],
+        #                             [0.0, 1.0, 0.0, 0.0],
+        #                             [0.0, 0.0, 1.0, -self.static_obs_size/2.0],
+        #                             [0.0, 0.0, 0.0, 1.0]])  
         
-        self.static_obs_publisher = rospy.Publisher(self.static_obs_topic, MarkerArray, queue_size=1)
+        # self.static_obs_publisher = rospy.Publisher(self.static_obs_topic, MarkerArray, queue_size=1)
         
-        pose_sub = message_filters.Subscriber(self.odom_topic, Odometry)
-        # This subscribe to the 2D Nav Goal in RVIZ
-        tag_sub = message_filters.Subscriber(self.static_obs_tag_topic, AprilTagDetectionArray)
-        self.static_obs_detection = message_filters.ApproximateTimeSynchronizer([pose_sub, tag_sub], 10, 0.1)
-        self.static_obs_detection.registerCallback(self.detect_obs)
+        # pose_sub = message_filters.Subscriber(self.odom_topic, Odometry)
+        # # This subscribe to the 2D Nav Goal in RVIZ
+        # tag_sub = message_filters.Subscriber(self.static_obs_tag_topic, AprilTagDetectionArray)
+        # self.static_obs_detection = message_filters.ApproximateTimeSynchronizer([pose_sub, tag_sub], 10, 0.1)
+        # self.static_obs_detection.registerCallback(self.detect_obs)
 
         # start planning and control thread
         threading.Thread(target=self.control_thread).start()
@@ -173,6 +176,10 @@ class TrajectoryPlanner():
         # Publisher for new goals
         self.goal_pub = rospy.Publisher('/move_base_simple/goal', PoseStamped, queue_size=1)
 
+        # Publisher for new goals   
+        self.prediction_pub = rospy.Publisher('/user_prediction', PoseStamped, queue_size=1)
+
+
     def setup_subscriber(self):
         '''
         This function sets up the subscriber for the odometry and path
@@ -180,6 +187,7 @@ class TrajectoryPlanner():
         self.pose_sub = rospy.Subscriber(self.odom_topic, Odometry, self.odometry_callback, queue_size=10)
         self.path_sub = rospy.Subscriber(self.path_topic, PathMsg, self.path_callback, queue_size=10)
         self.static_obs_sub = rospy.Subscriber(self.static_obs_topic, MarkerArray, self.static_obstacle_callback, queue_size=10)
+        self.user_control = rospy.Subscriber('/user_servo', ServoMsg, self.user_servo_callback, queue_size=10)
 
     def detect_obs(self, odom_msg, tag_list):
         '''
@@ -249,7 +257,46 @@ class TrajectoryPlanner():
             if not id in self.static_obstacle_lanelet_dict:
                 obs_lanelet, _ = self.lanelet_map.get_closest_lanelet(obs_center)
                 self.static_obstacle_lanelet_dict[id] = obs_lanelet.id
-        
+
+    def dyn_step(self, x, u, dt):
+            dx = np.array([x[2]*np.cos(x[3]),
+                        x[2]*np.sin(x[3]),
+                        u[0],
+                        x[2]*np.tan(u[1]*1.1)/0.257,
+                        0
+                        ])
+            
+            x_new = x + dx*dt
+            x_new[2] = max(0, x_new[2]) # do not allow negative velocity
+            x_new[3] = np.mod(x_new[3] + np.pi, 2 * np.pi) - np.pi
+            x_new[-1] = u[1]
+            return x_new
+
+    def user_servo_callback(self, msg):
+        self.user_input = [msg.throttle, msg.steer]
+        #self.control_pub.publish(msg)
+        return
+    
+        if self.plan_state_buffer.new_data_available:
+            # print('Throttle ', msg.throttle)
+            # print('steer ', msg.steer)
+            
+            
+            state = np.array(self.plan_state_buffer.readFromRT()[:-1])
+            #print("state ", state)
+            control = np.array([msg.throttle, msg.steer])
+            control = np.array([1, 0])
+
+            # for _ in range(10):
+            #     state, _ = self.planner.dyn.integrate_forward_np(state, control)
+            pred_state = self.dyn_step(self.plan_state_buffer.readFromRT()[:-1], [msg.throttle, msg.steer], 10)
+
+            pred_msg = PoseStamped()
+            pred_msg.pose.position.x = state[0]
+            pred_msg.pose.position.y = state[1]
+            pred_msg.header.frame_id = 'map'
+            self.prediction_pub.publish(pred_msg)
+            self.control_pub.publish(msg)
     def setup_service(self):
         '''
         Set up ros service
@@ -316,7 +363,7 @@ class TrajectoryPlanner():
                     goal_msg.pose.position.y = self.current_goal_pos[1]
                     goal_msg.header.frame_id = 'map'
                     self.goal_pub.publish(goal_msg)
-                    print("testing!")
+                    
             else:
                 self.start_count += 1
             
@@ -386,7 +433,7 @@ class TrajectoryPlanner():
             path_msg.poses[i].pose.position.x = smoothed_x[i]
             path_msg.poses[i].pose.position.y = smoothed_y[i]
 
-        print(len(path_msg.poses))
+        
                         
         self.path_modified_pub.publish(path_msg)
                 
@@ -555,8 +602,13 @@ class TrajectoryPlanner():
             # publish control command
             servo_msg = ServoMsg()
             servo_msg.header.stamp = rospy.get_rostime() # use the current time to avoid synchronization issue
-            servo_msg.throttle = throttle_pwm
-            servo_msg.steer = steer_pwm
+            if self.override_user:
+                servo_msg.throttle = throttle_pwm
+                servo_msg.steer = steer_pwm
+            else:
+                servo_msg.throttle = self.user_input[0]
+                servo_msg.steer = self.user_input[1]
+            
             self.control_pub.publish(servo_msg)
             
             # Record the control command and state for next iteration
@@ -579,6 +631,7 @@ class TrajectoryPlanner():
         while not rospy.is_shutdown():
             # determine if we need to replan
             if self.plan_state_buffer.new_data_available:
+                
                 state_cur = self.plan_state_buffer.readFromRT()
                 
                 t_cur = state_cur[-1] # the last element is the time
@@ -588,7 +641,7 @@ class TrajectoryPlanner():
                 if dt >= self.replan_dt:
                     # Get the initial controls for hot start
                     init_controls = None
-
+                    
                     original_policy = self.policy_buffer.readFromRT()
                     if original_policy is not None:
                         init_controls = original_policy.get_ref_controls(t_cur)
@@ -615,12 +668,30 @@ class TrajectoryPlanner():
                     self.planner.update_obstacles(obstacles_list)
                     
                     # Replan use ilqr
+            
+
                     new_plan = self.planner.plan(state_cur[:-1], init_controls, verbose=False)
+
+                    # if not init_controls is None:
+                    #     for i in range(10):
+                    #         #init_controls[0, i] = self.user_control[0]
+                    #         #init_controls[1, i] = self.user_control[1]
+                    user_state = self.dyn_step(state_cur[:-1], self.user_input, 0.5)
+                  
+                    user_plan = self.planner.plan(user_state, init_controls, verbose=False)
+                    # print('Plan 1 cost', new_plan['J'])
+                    # print('Plan 2 cost', user_plan['J'])
+                    # print()
+                
+                    
                     
                     plan_status = new_plan['status']
                     if plan_status == -1:
                         rospy.logwarn_once('No path specified!')
                         continue
+
+                    self.override_user = user_plan['J'] > 50
+                    print(self.override_user)
                     
                     if self.planner_ready:
                         # If stop planning is called, we will not write to the buffer

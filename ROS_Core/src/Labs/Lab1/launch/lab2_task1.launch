@@ -56,4 +56,7 @@
         <param name="obstacles_file"       value="$(arg obstacles)" />
     </node>
 
+    <node pkg="racecar_planner" type="keyboard_control.py" name="keyboard_control" output="$(arg output)">
+    </node>
+
 </launch>
