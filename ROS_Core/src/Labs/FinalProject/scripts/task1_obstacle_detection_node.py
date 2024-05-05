@@ -34,7 +34,7 @@ class StaticObstacle():
         tag_sub = message_filters.Subscriber(self.static_obs_tag_topic, AprilTagDetectionArray)
         self.static_obs_detection = message_filters.ApproximateTimeSynchronizer([pose_sub, tag_sub], 10, 0.1)
         self.static_obs_detection.registerCallback(self.detect_obs)
-
+        
     def detect_obs(self, odom_msg, tag_list):
         '''
         This function detects the static obstacle
