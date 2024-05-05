@@ -200,7 +200,7 @@ def exp_linear_cost(
 	'''
 	z = a * y
 	# return b * jnp.exp(z)
-	return jnp.where(z <= 0, b * jnp.exp(z), b * z + b)
+	return jnp.where(z <= 0, b * jnp.exp(-z*z), b * z + b)
 
 @jax.jit
 def quadratic_cost(

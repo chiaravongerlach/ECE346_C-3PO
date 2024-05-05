@@ -142,6 +142,7 @@ class TrajectoryPlanner():
         '''
         # Initialize ILQR solver
         self.planner = ILQR(self.ilqr_params_abs_path)
+        self.user_planner = ILQR(os.path.join(self.package_path, 'configs/task2_user.yaml'))
 
         # create buffers to handle multi-threading
         self.plan_state_buffer = RealtimeBuffer()
@@ -277,26 +278,6 @@ class TrajectoryPlanner():
         #self.control_pub.publish(msg)
         return
     
-        if self.plan_state_buffer.new_data_available:
-            # print('Throttle ', msg.throttle)
-            # print('steer ', msg.steer)
-            
-            
-            state = np.array(self.plan_state_buffer.readFromRT()[:-1])
-            #print("state ", state)
-            control = np.array([msg.throttle, msg.steer])
-            control = np.array([1, 0])
-
-            # for _ in range(10):
-            #     state, _ = self.planner.dyn.integrate_forward_np(state, control)
-            pred_state = self.dyn_step(self.plan_state_buffer.readFromRT()[:-1], [msg.throttle, msg.steer], 10)
-
-            pred_msg = PoseStamped()
-            pred_msg.pose.position.x = state[0]
-            pred_msg.pose.position.y = state[1]
-            pred_msg.header.frame_id = 'map'
-            self.prediction_pub.publish(pred_msg)
-            self.control_pub.publish(msg)
     def setup_service(self):
         '''
         Set up ros service
@@ -650,6 +631,7 @@ class TrajectoryPlanner():
                     if self.path_buffer.new_data_available:
                         new_path = self.path_buffer.readFromRT()
                         self.planner.update_ref_path(new_path)
+                        self.user_planner.update_ref_path(new_path)
                     
                     # Update the static obstacles
                     obstacles_list = []
@@ -666,6 +648,7 @@ class TrajectoryPlanner():
                         frs_respond = None
                         
                     self.planner.update_obstacles(obstacles_list)
+                    self.user_planner.update_obstacles(obstacles_list)
                     
                     # Replan use ilqr
             
@@ -678,7 +661,7 @@ class TrajectoryPlanner():
                     #         #init_controls[1, i] = self.user_control[1]
                     user_state = self.dyn_step(state_cur[:-1], self.user_input, 0.5)
                   
-                    user_plan = self.planner.plan(user_state, init_controls, verbose=False)
+                    user_plan = self.user_planner.plan(user_state, init_controls, verbose=False)
                     # print('Plan 1 cost', new_plan['J'])
                     # print('Plan 2 cost', user_plan['J'])
                     # print()
@@ -689,8 +672,10 @@ class TrajectoryPlanner():
                     if plan_status == -1:
                         rospy.logwarn_once('No path specified!')
                         continue
-
-                    self.override_user = user_plan['J'] > 50
+                    
+                    print(user_plan['J'])
+                              
+                    self.override_user = user_plan['J'] > 100
                     print(self.override_user)
                     
                     if self.planner_ready:
@@ -721,6 +706,7 @@ class TrajectoryPlanner():
             if self.path_buffer.new_data_available and self.planner_ready:
                 new_path = self.path_buffer.readFromRT()
                 self.planner.update_ref_path(new_path)
+                self.user_planner.update_ref_path(new_path)
                 
                 # check if there is an existing policy
                 original_policy = self.policy_buffer.readFromRT()
