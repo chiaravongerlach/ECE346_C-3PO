@@ -41,8 +41,8 @@ width: 0.22 # width of the vehicle
 length: 0.40 # length of the vehicle
 
 # steering angle limits
-delta_max: 0.01 #0.35 # maximum steering angle
-delta_min: -0.01 #-0.35 # minimum steering angle
+delta_max: 0.35 #0.35 # maximum steering angle
+delta_min: -0.35 #-0.35 # minimum steering angle
 
 # velocity limits
 v_max: 5.0 # maximum velocity
@@ -57,7 +57,7 @@ a_max: 5.0 # maximum acceleration
 a_min: -5.0 # minimum acceleration
 
 # reference velocity
-v_ref: 0.4 # reference velocity
+v_ref: 0.4 #0.4 # reference velocity
 ####################################################
 ########## Parameters for ILQR COST ################
 ####################################################
@@ -65,30 +65,32 @@ v_ref: 0.4 # reference velocity
 ########        State Cost          ############
 
 # Path Offset Cost
-path_weight: 200.0 #100.0 # weight for the path deviation cost
+path_weight: 100.0 #100.0 # weight for the path deviation cost
 
 # Velocity Cost
-vel_weight: 25.0 # weight for the velocity cost
+vel_weight: 75.0 # weight for the velocity cost
 
 # Speed Limit Cost
 vel_limit_a: 10.0 # parameter for speed limit cost
 vel_limit_b: 1.0 # parameter for ExpLinear Cost
 
 # Heading Cost
-heading_weight: 10.0 # weight for the heading cost
+heading_weight: 4.0 # 100 weight for the heading cost
 
 # Lateral Acceleration Cost
 # We use ExpLinearCost for lateral acceleration cost
 lat_accel_thres: 6.0 # threshold for lateral acceleration cost
 lat_accel_a: 5.0 # parameter for lateral acceleration cost
-lat_accel_b: 2.0 # parameter for ExpLinear Cost
+lat_accel_b: 0.0 # parameter for ExpLinear Cost
 
 # Progress Cost
 progress_weight: 0 # weight for the progress cost
 
 # Lane Boundary Cost
-lane_boundary_a: 500.0 # parameter for lane boundary cost
-lane_boundary_b: 10.0 # parameter for ExpLinear Cost
+# dim_right_boundary: 0 # dimension of lane boundary in the reference
+# dim_left_boundary: 0 # dimension of lane boundary in the reference
+lane_boundary_a: 100.0 # parameter for lane boundary cost 0
+lane_boundary_b: 10.0 # parameter for ExpLinear Cost 0
 
 ########        Control Cost          ############
 # those value should not be too small
@@ -96,5 +98,5 @@ ctrl_cost_accel_weight: 1.0
 ctrl_cost_steer_weight: 1.0
 
 ########        Obstacle Cost          ############
-obs_a: 1000.0 #1000.0 # parameter for obstacle cost
-obs_b: 0 #20.0 # parameter for ExpLinear Cost
+obs_a: 100.0 #1000.0 # parameter for obstacle cost 100
+obs_b: 20.0 #20.0 # parameter for ExpLinear Cost 10
